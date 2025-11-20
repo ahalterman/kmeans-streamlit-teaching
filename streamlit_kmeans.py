@@ -255,6 +255,93 @@ def create_v_questions_chart(cluster_df, total_df, question_order=None):
     return chart
 
 
+
+def create_state_capacity_chart(cluster_df, total_df, question_order=None):
+    """
+    Create a chart showing average responses for all V questions
+    
+    Parameters:
+    -----------
+    cluster_df : DataFrame
+        The filtered cluster data
+    total_df : DataFrame
+        The complete sample data
+    question_order : list, optional
+        Ordered list of question column names to display
+    """
+    # Get all V question columns
+    if question_order is None:
+        v_columns = [col for col in cluster_df.columns if col.startswith('approve_') or 
+                     col.startswith('trust_') or col.startswith('gov_') or 
+                     col.startswith('corrupt_')]
+    else:
+        v_columns = question_order
+    
+    # Calculate means for each V question
+    cluster_means = cluster_df[v_columns].mean()
+    total_means = total_df[v_columns].mean()
+    
+    # Create comparison dataframe
+    comparison_data = []
+    for col in v_columns:
+        # Clean up column name for display
+        question_name = ' '.join(col.split("_")[1:-1]).title()
+        comparison_data.append({
+            'question': question_name,
+            'question_raw': col,  # Keep original for sorting
+            'group': 'Selected Cluster',
+            'mean_response': cluster_means[col]
+        })
+        comparison_data.append({
+            'question': question_name,
+            'question_raw': col,
+            'group': 'Total Sample',
+            'mean_response': total_means[col]
+        })
+    
+    comparison_df = pd.DataFrame(comparison_data)
+    
+    # Create sort order based on original column order
+    if question_order:
+        sort_order = [col.replace('_', ' ').title() for col in question_order]
+    else:
+        sort_order = None
+    
+    # Create chart
+    chart = alt.Chart(comparison_df).mark_bar().encode(
+        x=alt.X('group:N', title=None, axis=None),  # Remove x-axis labels
+        y=alt.Y('mean_response:Q', title='(Dis)Trust (lower=more trust)', 
+                scale=alt.Scale(domain=[1, 5])),
+        color=alt.Color('group:N', 
+                       scale=alt.Scale(domain=['Selected Cluster', 'Total Sample'],
+                                      range=['#1f77b4', '#9EBAD2FF']),
+                       legend=alt.Legend(title='Group')),
+        column=alt.Column('question:N', 
+                         title=None,
+                         sort=sort_order,
+                         header=alt.Header(
+                             labelAngle=0, 
+                             labelAlign='right',
+                             labelBaseline='middle',
+                             labelPadding=1,
+                             titleOrient='bottom'
+                         )),
+        tooltip=[
+            alt.Tooltip('question:N', title='Question'),
+            alt.Tooltip('group:N', title='Group'),
+            alt.Tooltip('mean_response:Q', title='Avg Response', format='.2f')
+        ]
+    ).properties(
+        width=80,
+        height=300,
+        title='Average Distrust By Question'
+    ).configure_header(
+        labelFontSize=10
+    )
+    
+    return chart
+
+
 # Example usage in Streamlit:
 def display_cluster_analysis(cluster_df, total_df):
     """
@@ -335,14 +422,15 @@ def fit_kmeans(X_scaled, num_clusters):
     return model
 
 
-def prep_viz(df, tooltip_vars = ['tooltip_info']):
+def prep_viz(df, tooltip_vars = ['tooltip_info'],
+             axis_titles = ["PC1", "PC2"]):
     # add the cluster labels to the dataframe
 # plot the clusters in 2D using streamlit
     c = (
         alt.Chart(df)
         .mark_circle(size=200, opacity=0.6)
-        .encode(x=alt.X("x", title="PC1"),
-                 y=alt.Y("y", title="PC2"),
+        .encode(x=alt.X("x", title=axis_titles[0]),
+                 y=alt.Y("y", title=axis_titles[1]),
                  color="cluster",
                  tooltip=tooltip_vars + ["cluster"]
                  )
@@ -355,7 +443,8 @@ with tab1:
     st.markdown("Here, we're using Hendrix's data to identify whether states cluster together based on variables related to state capacity (e.g., tax revenue, military spending, level of democracy).")
     with st.expander("Details on Hendrix (2010)"):
         st.markdown("Hendrix reviews the existing literature on state capacity, specifically in the context of the civil war literature, and identifies several arguments about how to measure state capacity, along with a set of variables that the previous literature argues are potential indicators of state capacity.")
-        st.markdown("""He then runs principle components analysis and argues that empirically, variables related to state capacity can be summarized along three axis:" \
+        st.markdown("""He then runs principle components analysis and argues that empirically, variables related to state capacity can be summarized along three axis:" 
+                    
 - "rational legality": high quality bureaucracies, high revenue, technologically advanced, usually democracies
 - "rentier-autocraticness": high revenues from primary commodity exports, high government income as percent of GDP, low levels of democracy
 - "neopatrimoniality":  high income, high primary commodity exports, *low* levels of taxation, high military spending.      
@@ -373,7 +462,7 @@ with tab1:
     df_hendrix["cluster"] = "cluster " + (df_hendrix["cluster"] + 1).astype(str)
 
 
-    c = prep_viz(df_hendrix)
+    c = prep_viz(df_hendrix, axis_titles = ['"rational legality"', '"rentier-autocraticness"'])
     # Draw the figure
     st.altair_chart(c, use_container_width=True, theme="streamlit")
     st.markdown("Showing just data for 1999.") 
@@ -383,6 +472,25 @@ with tab1:
     countries = ', '.join(selected_df["country"].unique().tolist())
     st.markdown(f"Cluster {cluster_selected}: **{countries}**")
 
+    with st.expander("Variables used"):
+        st.markdown("""
+- `rgdpch`: (Real) GDP per capita
+- `log_rgdpch`: (Logged) real GDP per capita
+- `milper`: Military personnel per capita
+- `log_milex_cap`: (Log) military expenditure per capita
+- `icrg_bq`: International Country Risk Guide (ICRG) expert assessment of bureaucratic quality)
+- `icrg_ip`: ICRG expert assessment of investment profile (incl. expropriation risk)
+- `isxp`: Primary commodity exports as % of GDP
+- `ifuel`: Fuel exports as a proportion of all exports
+- `taxratio`: taxes as a percentage of GDP
+- `totrev`: total government revenue as % of GDP
+- `rpc1`:  Relative Political Capacity: actual tax revenue vs. expected tax revenue (Kugler & Arbetman 1997)
+- `p_polity2`: Polity 2 score (higher values = more democratic)
+- `p_polity2_sq`: Polity2, squared
+- `xpolity`: an alternative measure of autocracy-democracy
+- `xpolity2`: squared XPolity
+- `sip2`: Scalar Index of Polities--different measures of state capacity for democracies and autocracies (Gates et al. 2006)
+""")
     with st.expander("*Details on PCA"):
         st.markdown("Principal Component Analysis (PCA) is a technique for reducing the dimensions of data while still preserving as much information as possible. You can think about it as rotating the axes of the data to find the directions of greatest variance.")
     with st.expander("Show all data"):
